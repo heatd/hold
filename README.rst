@@ -1,6 +1,6 @@
-================
+==============================
 HOLD - heat's Onyx link editor
-================
+==============================
 
 hold is a simple ELF linker. It only works for POSIX-like platforms.
 
@@ -8,6 +8,7 @@ Building
 ================
 
 Use meson to build hold, as such::
+
   meson build/
   ninja -C build/
 
