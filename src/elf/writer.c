@@ -107,7 +107,7 @@ int gather_sections_for_phdr(struct program_header *phdr, int seen, struct elf_w
                 return -1;
 
         for (i = 0; i < writer->nr_output_secs; i++) {
-                struct output_section *sec = &writer->out_section[i];
+                struct output_section *sec = writer->out_section[i];
                 /* Infer flags and permissions from the first input section
                  * associated with this output section.
                  */
@@ -215,6 +215,7 @@ void assign_output_section_addr_off(struct program_header *phdr, u32 to_skip)
                 assert(size >= total);
                 size -= total;
                 addr += total;
+                base_offset += total;
 
                 assign_input_sections_off(os);
 
@@ -264,7 +265,7 @@ int create_program_headers(struct elf_writer *writer)
         muptr base_address = DEFAULT_BASE_ADDRESS;
 
         for (i = 0; i < writer->nr_output_secs; i++) {
-                struct output_section *sec = &writer->out_section[i];
+                struct output_section *sec = writer->out_section[i];
                 /* Infer flags and permissions from the first input section
                  * associated with this output section.
                  */
@@ -388,36 +389,31 @@ void write_phdrs(struct elf_writer *writer, u8 *mapping)
 }
 
 static
-void write_section(int fd, struct input_section *inp, u8 *mapping)
+void write_section(struct input_file *file, struct input_section *inp, u8 *mapping)
 {
         if (inp->sh_type == SHT_NOBITS)
                 return;
         struct output_section *out = inp->out;
         verbose("Copying [%lu, %lu] to %lu\n", inp->sh_offset, inp->sh_offset + inp->sh_size - 1, out->offset + inp->output_off);
-        if (pread(fd, mapping + out->offset + inp->output_off, inp->sh_size, inp->sh_offset) < 0) {
-                err(1, "write_section: pread");
-        }
+        file->ops->read(file, mapping + out->offset + inp->output_off, inp->sh_size, inp->sh_offset);
 }
 
 static
 void input_write_segs(struct input_file *file, u8 *mapping)
 {
-        int fd;
         u32 i;
 
-        fd = open(file->name, O_RDONLY);
-        if (fd < 0)
-                err(1, "%s", file->name);
+        file->ops->open(file);
 
         for (i = 0; i < file->nsections; i++) {
                 struct input_section *inp = &file->sections[i];
 
                 /* TODO: This is kind of random */
                 if (inp->out && inp->out->offset)
-                        write_section(fd, inp, mapping);
+                        write_section(file, inp, mapping);
         }
 
-        close(fd);
+        file->ops->close(file);
 }
 
 static
@@ -497,8 +493,9 @@ void elf_writer_destroy(struct elf_writer *writer)
         u32 i;
 
         for (i = 0; i < writer->nr_output_secs; i++) {
-                struct output_section *sec = &writer->out_section[i];
+                struct output_section *sec = writer->out_section[i];
                 free((void *) sec->name);
+                free(sec);
         }
 
         free(writer->out_section);

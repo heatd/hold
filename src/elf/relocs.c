@@ -6,6 +6,7 @@
 #include <hold.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <elf/elf.h>
 
@@ -15,16 +16,18 @@ int process_rela(struct input_file *file, elf_shdr *section, u8 *mapping)
         u32 target_section = section->sh_info - 1;
         elf_rela *rela = (elf_rela *) (mapping + section->sh_offset);
         uptr nr_relocs = section->sh_size / section->sh_entsize;
-        uptr i;
+        uptr i = file->nrelocs;
 
-        file->nrelocs = nr_relocs;
-        file->relocs = calloc(file->nrelocs, sizeof(struct relocation));
+        file->nrelocs += nr_relocs;
+        file->relocs = reallocarray(file->relocs, file->nrelocs, sizeof(struct relocation));
         if (!file->relocs) {
                 warn("calloc");
                 return -1;
         }
 
-        for (i = 0; i < nr_relocs; i++, rela = (elf_rela *)((u8 *) rela + section->sh_entsize)) {
+        memset(file->relocs + i, 0, sizeof(struct relocation) * nr_relocs);
+
+        for (; i < file->nrelocs; i++, rela = (elf_rela *)((u8 *) rela + section->sh_entsize)) {
                 struct relocation *reloc = &file->relocs[i];
                 u32 target_sym_idx;
 

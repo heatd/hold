@@ -37,7 +37,13 @@ struct symbol {
          * has not been an overridden symbol.
          */
         u8 nofree_name : 1;
-        struct input_section *section;
+
+        /* For lazy symbols, this holds the position in the ar archive */
+        u32 ar_pos;
+        union {
+                struct input_section *section;
+                struct input_file *file;
+        };
 
         struct symbol *next;
 };
@@ -81,9 +87,18 @@ struct input_section {
         muptr output_off;
 };
 
+struct ar_archive_data;
+
+struct input_file_ops {
+        int (*open)(struct input_file *file);
+        void (*read)(struct input_file *file, void *buf, uptr size, uptr offset);
+        void (*close)(struct input_file *file);
+};
+
 struct input_file {
         const char *name;
         u16 emachine;
+        u32 free_name : 1;
 
         struct input_section *sections;
         u32 nsections;
@@ -91,6 +106,21 @@ struct input_file {
         u32 nsyms;
         struct relocation *relocs;
         u32 nrelocs;
+
+        struct ar_archive_data *ardata;
+
+        struct {
+                u8 *long_file_names;
+        } archive;
+
+        union {
+                int fd;
+                struct {
+                        uptr archive_off;
+                };
+        } openf;
+
+        const struct input_file_ops *ops;
 };
 
 typedef Elf64_Ehdr elf_ehdr;
@@ -102,13 +132,13 @@ typedef Elf64_Phdr elf_phdr;
 int process_rela(struct input_file *file, elf_shdr *section, u8 *mapping);
 struct symbol *lookup_symtable(const char *name);
 
-struct output_section *elf_merge_sections(struct input_file **files, u32 nfiles,
+struct output_section **elf_merge_sections(struct input_file **files, u32 nfiles,
                                           u32 *p_noutput);
 
 struct program_header;
 
 struct elf_writer {
-        struct output_section *out_section;
+        struct output_section **out_section;
         u32 nr_output_secs;
         struct hold_options *options;
         struct input_file **files;
@@ -125,5 +155,13 @@ void elf_writer_destroy(struct elf_writer *writer);
 void relocate_symbols(void);
 
 void elf_do_relocs(struct input_file *file, struct relocation *relocs, u32 nrelocs, u8 *mapping);
+
+int add_to_symtable(struct symbol *sym);
+
+/* If set, we should free this filename (as it was malloc'd) */
+#define ELF_PROCESS_FILENAME_FREE (1 << 0)
+
+int elf_process_objfile(const char *filename, void *map, uptr fd_size,
+                        const struct input_file_ops *ops, int flags);
 
 #endif

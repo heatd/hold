@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 
 #include <fnv.h>
+#include <elf/ar.h>
 #include <elf/elf.h>
 #include <elf/output_section.h>
 
@@ -38,6 +39,100 @@ const char *elf_get_str(u32 str, const char *strs)
 }
 
 static
+void replace_sym(struct symbol *dst, struct symbol *src)
+{
+        src->next = dst->next;
+        free((void *) dst->name);
+        memcpy(dst, src, sizeof(*src));
+        src->nofree_name = 1;
+
+}
+
+static
+int resolve_sym_conflict(struct symbol *s, struct symbol *sym)
+{
+        /* Rules for symbol "overlaying":
+         * UNDEFINED -> DEFINED is allowed (we have just defined a symbol, yay!)
+         * DEFINED weak -> DEFINED strong is allowed
+         * DEFINED -> DEFINED is an error
+         * UNDEFINED -> UNDEFINED is a nop
+         * DEFINED -> UNDEFINED is a nop
+         * LAZY -> LAZY is a nop (second symbol is ignored, see below for details on static archives)
+         * DEFINED -> LAZY is a nop
+         * UNDEFINED -> LAZY and LAZY -> UNDEFINED prompt the archive
+         *              file to be loaded
+         */
+        switch (s->symtype) {
+                case SYM_TYPE_DEFINED: {
+                        if (sym->symtype == SYM_TYPE_DEFINED) {
+                                if (!(s->weak && !sym->weak) && !(!s->weak && sym->weak)) {
+                                        warnx("double definition error for symbol %s", sym->name);
+                                        return -1;
+                                }
+
+                                if (!sym->weak) {
+                                        /* ok, previous was weak, new is strong, replace. */
+                                        replace_sym(s, sym);
+                                }
+
+                                /* fallthrough to return 0 */
+                         }
+
+                         return 0;
+                }
+
+                case SYM_TYPE_UNDEFINED: {
+                        if (sym->symtype == SYM_TYPE_DEFINED) {
+                                replace_sym(s, sym);
+                                return 0;
+                        }
+
+                        if (sym->symtype == SYM_TYPE_LAZY)
+                                return resolve_lazy(sym);
+                        return 0;
+                }
+
+                case SYM_TYPE_LAZY: {
+                        /* Notes on static archive symbol resolution:
+                         * Traditionally, static library symbol resolution is
+                         * very simple. Imagining an invocation such as
+                         * "ld a.o b.o libc.a c.o", libc.a will resolve a.o
+                         * and b.o's undefined references, but not c.o's.
+                         * When looking up a symbol, we only look at the first
+                         * entry in that archive's symbol table; it doesn't
+                         * matter whether the entry is weak or strong or whatnot.
+                         * We take a slightly different strategy: lld does not
+                         * do this, and "ld libc.a a.o b.o c.o" will resolve a,
+                         * b and c's undefined references. This allows for
+                         * greater parallelism when linking.
+                         *
+                         * Note: a common trick in static libraries such as
+                         * libc.a is to stub out certain functions with weak
+                         * binding, in order to avoid pulling in more object
+                         * files. If those individual features are then pulled
+                         * (through, say, a reference to a symbol), it will pull
+                         * the entire object file, replacing the previous weak
+                         * symbol with a strong one.
+                         *
+                         * It's always worth keeping in mind that a single
+                         * symbol reference pulls an entire object file.
+                         */
+                        if (sym->symtype == SYM_TYPE_LAZY) {
+                                return 0;
+                        }
+
+                        if (sym->symtype == SYM_TYPE_UNDEFINED)
+                                return resolve_lazy(s);
+
+                        replace_sym(s, sym);
+                        return 0;
+                }
+
+                default:
+                        abort();
+        }
+}
+
 int add_to_symtable(struct symbol *sym)
 {
         /* Add @sym to the symbol table. If we overlay this symbol on top of another,
@@ -57,55 +152,19 @@ int add_to_symtable(struct symbol *sym)
                 struct symbol *s = *sp;
                 /* Check for name collisions */
                 if (s->name_hash == sym->name_hash && !strcmp(s->name, sym->name)) {
-                        /* Rules for symbol "overlaying":
-                         * UNDEFINED -> DEFINED is allowed (we have just defined a symbol, yay!)
-                         * DEFINED weak -> DEFINED strong is allowed
-                         * DEFINED -> DEFINED is an error
-                         * UNDEFINED -> UNDEFINED is a nop
-                         * DEFINED -> UNDEFINED is a nop
+                        if (resolve_sym_conflict(s, sym) < 0)
+                                return -1;
+                        /* We'll never append after having a conflict. Either
+                         * resolve_sym_conflict overwrote it with memcpy, or
+                         * we got an error. No other option.
                          */
-                        switch (s->symtype) {
-                                case SYM_TYPE_DEFINED: {
-                                        if (sym->symtype == SYM_TYPE_DEFINED) {
-                                                if (!(s->weak && !sym->weak) && !(!s->weak && sym->weak)) {
-                                                        warnx("double definition error for symbol %s", sym->name);
-                                                        return -1;
-                                                }
-
-                                                if (!sym->weak) {
-                                                        /* ok, previous was weak, new is strong, replace. */
-                                                        sym->next = s->next;
-                                                        free((void *) s->name);
-                                                        memcpy(s, sym, sizeof(*s));
-                                                        s->nofree_name = 1;
-                                                }
-
-                                                goto out_noappend;
-                                        }
-
-                                        goto out_noappend;
-                                }
-
-                                case SYM_TYPE_UNDEFINED: {
-                                        if (sym->symtype == SYM_TYPE_DEFINED) {
-                                                sym->next = s->next;
-                                                free((void *) s->name);
-                                                memcpy(s, sym, sizeof(*s));
-                                                s->nofree_name = 1;
-                                                goto out_noappend;
-                                        }
-                                }
-
-                                default:
-                                        abort();
-                        }
+                        return 0;
                 }
 
                 sp = &(s->next);
         }
 
         *sp = sym;
-out_noappend:
         return 0;
 }
 
@@ -130,8 +189,8 @@ void relocate_sym(struct symbol *s)
         struct input_section *inp;
         struct output_section *os;
 
-        /* Skip ABS */
-        if (s->abs)
+        /* Skip ABS, lazy symbols and weak undefined */
+        if (s->abs || s->symtype == SYM_TYPE_LAZY || (s->weak && s->symtype == SYM_TYPE_UNDEFINED))
                 return;
 
         inp = s->section;
@@ -161,6 +220,7 @@ void relocate_symbols(void)
 
         for (i = 0; i < nfiles; i++) {
                 struct input_file *inp = files[i];
+                verbose("Relocating %s\n", inp->name);
 
                 for (j = 0; j < inp->nsyms; j++) {
                         struct symbol *s = &inp->syms[j];
@@ -181,8 +241,16 @@ int check_for_unresolved_syms(void)
 
                 while (s) {
                         if (s->symtype == SYM_TYPE_UNDEFINED) {
-                                warnx("Undefined symbol %s", s->name);
-                                st = -1;
+                                if (s->weak) {
+                                        /* A weak undefined reference is
+                                         * allowed. In this case, we set value
+                                         * to 0.
+                                         */
+                                        s->value = 0;
+                                } else {
+                                        warnx("Undefined symbol %s", s->name);
+                                        st = -1;
+                                }
                         }
 
                         s = s->next;
@@ -276,6 +344,37 @@ uptr get_fd_size(int fd)
 }
 
 static
+int default_file_open(struct input_file *file)
+{
+        file->openf.fd = open(file->name, O_RDONLY);
+        if (file->openf.fd < 0) {
+                err(1, "%s", file->name);
+        }
+
+        return 0;
+}
+
+static
+void default_file_read(struct input_file *file, void *buf, uptr size, uptr offset)
+{
+        if (pread(file->openf.fd, buf, size, offset) < 0) {
+                err(1, "default_file_read: pread");
+        }
+}
+
+static void default_file_close(struct input_file *file)
+{
+        close(file->openf.fd);
+}
+
+const struct input_file_ops default_ops =
+{
+        .open = default_file_open,
+        .read = default_file_read,
+        .close = default_file_close
+};
+
+static
 struct input_file *create_input_file(const char *filename)
 {
         struct input_file *file = calloc(1, sizeof(struct input_file));
@@ -289,6 +388,9 @@ struct input_file *create_input_file(const char *filename)
                 if (!files)
                         return NULL;
         }
+
+        file->openf.fd = -1;
+        file->ops = &default_ops;
 
         files[nfiles++] = file;
         return file;
@@ -368,10 +470,12 @@ int parse_elf_sections(struct input_file *f, uptr shoff, u32 shnum, u32 shentsiz
 }
 
 static
-int parse_elf(struct input_file *f, u8 *mapping)
+int parse_elf(struct input_file *f, u8 *mapping, uptr filesz)
 {
         elf_ehdr *header = (elf_ehdr *) mapping;
         if (!!memcmp(header->e_ident, "\x7f""ELF", 4)) {
+                if (is_ar_archive(mapping))
+                        return parse_ar(f, mapping, filesz);
                 warnx("%s is not an ELF file!", f->name);
                 return -1;
         }
@@ -394,35 +498,64 @@ int parse_elf(struct input_file *f, u8 *mapping)
         return 0;
 }
 
-static
-int elf_process_input(const char *filename)
+int elf_process_objfile(const char *filename, void *map, uptr fd_size,
+                        const struct input_file_ops *ops, int flags)
 {
-        int fd = open(filename, O_RDONLY);
-        if (fd < 0) {
-                warn("%s: Error opening", filename);
-                return -1;
-        }
-
-        void *map = mmap(NULL, get_fd_size(fd), PROT_READ, MAP_SHARED, fd, 0);
-        if (map == MAP_FAILED) {
-                warn("%s: Error mmapping input file", filename);
-                return -1;
-        }
-
         struct input_file *f = create_input_file(filename);
         if (!f) {
                 warn("%s: Failed to create input_file", filename);
                 return -1;
         }
 
-        int st = parse_elf(f, map);
+        f->ops = ops;
+
+        if (ops != &default_ops) {
+                /* HACK! I hate this, but since we only have 3 types of
+                 * input files atm (object/archive file and .o coming from a .a)
+                 * this solution Just Works.
+                 */
+                f->ardata = map;
+        }
+
+        if (flags & ELF_PROCESS_FILENAME_FREE)
+                f->free_name = 1;
+
+        return parse_elf(f, map, fd_size);
+}
+
+static
+int elf_process_input(const char *filename)
+{
+        uptr fd_size;
+
+        int fd = open(filename, O_RDONLY);
+        if (fd < 0) {
+                warn("%s: Error opening", filename);
+                return -1;
+        }
+
+        fd_size = get_fd_size(fd);
+
+        void *map = mmap(NULL, fd_size, PROT_READ, MAP_SHARED, fd, 0);
+        if (map == MAP_FAILED) {
+                warn("%s: Error mmapping input file", filename);
+                return -1;
+        }
+
+        int st = elf_process_objfile(filename, map, fd_size, &default_ops, 0);       
+        if (!is_ar_archive(map)) {
+                /* HACK! Since ar archives want permanent mappings, this works.
+                 * But should eventually be refactored as something else.
+                 */
 #define DEBUG_MMAP 1
 #ifdef DEBUG_MMAP
-        /* Catch erroneous accesses to the file mappings using PROT_NONE */
-        mprotect(map, get_fd_size(fd), PROT_NONE);
+                /* Catch erroneous accesses to the file mappings using PROT_NONE */
+                mprotect(map, fd_size, PROT_NONE);
 #else
-        munmap(map, get_fd_size(fd));
+                munmap(map, get_fd_size(fd));
 #endif
+        }
+
         close(fd);
         return st;
 }
@@ -432,7 +565,7 @@ static void destroy_symbol_table(void);
 
 int elf_do_link(struct hold_options *options)
 {
-        struct output_section *out_sec;
+        struct output_section **out_sec;
         u32 nr_output_sec;
         int i;
 
@@ -491,7 +624,12 @@ void destroy_file(struct input_file *inp)
                 if (!s->nofree_name)
                         free((void *) s->name);
         }
+
         free(inp->syms);
+
+        if (inp->free_name)
+                free((void *) inp->name);
+
         free(inp);
 }
 
