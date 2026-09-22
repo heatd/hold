@@ -28,7 +28,7 @@ struct program_header {
 static
 int write_elf_header(struct elf_writer *writer, int fd, uptr entry_point)
 {
-        elf_ehdr ehdr;
+        elf_ehdr ehdr = {0};
         /* TODO: ET_DYN */
         ehdr.e_type = ET_EXEC;
         ehdr.e_entry = 0;
