@@ -145,6 +145,12 @@ struct elf_writer {
 	u32 nfiles;
 	struct program_header *phdr;
 	u32 nr_phdrs;
+	u32 shdr_offset;
+	u32 shdr_data_off;
+	u32 shdr_data_len;
+	char *shstrtab;
+	u32 shstrtab_len;
+	u32 shstrtab_pos;
 };
 
 /* Taking an elf writer, write an output, linked and relocated ELF file */

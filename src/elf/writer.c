@@ -46,6 +46,10 @@ int write_elf_header(struct elf_writer *writer, int fd, uptr entry_point)
 	ehdr.e_phoff = sizeof(ehdr);
 	ehdr.e_phentsize = sizeof(elf_phdr);
 	ehdr.e_phnum = writer->nr_phdrs;
+	ehdr.e_shentsize = sizeof(elf_shdr);
+	ehdr.e_shnum = writer->nr_output_secs + 2;
+	ehdr.e_shoff = writer->shdr_offset;
+	ehdr.e_shstrndx = writer->nr_output_secs + 1;
 
 	return write(fd, &ehdr, sizeof(ehdr));
 }
@@ -438,6 +442,90 @@ void relocate(struct elf_writer *writer, u8 *mapping)
 	}
 }
 
+static
+void write_section_hdr(elf_shdr *shdr, struct elf_writer *writer, struct output_section *out)
+{
+	u32 name_len;
+
+	shdr->sh_name = writer->shstrtab_pos;
+	shdr->sh_addr = out->address;
+	shdr->sh_addralign = out->max_alignment;
+	shdr->sh_entsize = 0;
+	shdr->sh_flags = out->isection_head->sh_flags;
+	shdr->sh_info = 0;
+	shdr->sh_link = 0;
+	shdr->sh_offset = out->offset;
+	shdr->sh_size = out->size;
+
+	/* XXX dirty hack */
+	if (!out->offset)
+		shdr->sh_size = 0;
+	shdr->sh_type = out->isection_head->sh_type;
+
+	name_len = strlen(out->name) + 1;
+	memcpy(writer->shstrtab + writer->shstrtab_pos, out->name, name_len);
+	writer->shstrtab_pos += name_len;
+}
+
+static
+void write_shstrtab(elf_shdr *shdr, struct elf_writer *writer, u8 *mapping)
+{
+	u32 name_len;
+
+	shdr->sh_name = writer->shstrtab_pos;
+	shdr->sh_addr = 0;
+	shdr->sh_addralign = 1;
+	shdr->sh_entsize = 0;
+	shdr->sh_flags = SHF_STRINGS;
+	shdr->sh_info = 0;
+	shdr->sh_link = 0;
+	shdr->sh_offset = writer->shdr_data_off;
+	shdr->sh_size = writer->shstrtab_len;
+	shdr->sh_type = SHT_STRTAB;
+
+	name_len = strlen(".shstrtab") + 1;
+	memcpy(writer->shstrtab + writer->shstrtab_pos, ".shstrtab", name_len);
+	writer->shstrtab_pos += name_len;
+
+	memcpy(mapping + shdr->sh_offset, writer->shstrtab, writer->shstrtab_len);
+}
+
+static
+void write_section_headers(struct elf_writer *writer, u8 *mapping)
+{
+	elf_shdr *shdr = (elf_shdr *) (mapping + writer->shdr_offset);
+	u32 section;
+
+	/* NULL string - useful for a variety of situations */
+	writer->shstrtab[0] = '\0';
+	writer->shstrtab_pos++;
+
+	/* NULL section */
+	*shdr++ = (elf_shdr){0};
+
+	for (section = 0; section < writer->nr_output_secs; section++) {
+		write_section_hdr(shdr++, writer, writer->out_section[section]);
+	}
+
+	write_shstrtab(shdr, writer, mapping);
+}
+
+static
+u32 calculate_shdr_data(struct elf_writer *writer)
+{
+	u32 i, total = strlen(".shstrtab") + 2;
+
+	/* Right now, it's just the shtrtab data we need */
+	for (i = 0; i < writer->nr_output_secs; i++)
+		total += strlen(writer->out_section[i]->name) + 1;
+	writer->shstrtab = malloc(total);
+	if (!writer->shstrtab)
+		err(1, "out of memory allocating shstrtab");
+	writer->shstrtab_len = total;
+	writer->shstrtab_pos = 0;
+	return total;
+}
+
 /* Taking an elf writer, write an output, linked and relocated ELF file */
 int elf_do_write(struct elf_writer *writer)
 {
@@ -456,8 +544,13 @@ int elf_do_write(struct elf_writer *writer)
 
 	relocate_symbols();
 
-	file_size = writer->phdr[writer->nr_phdrs - 1].offset +
-		writer->phdr[writer->nr_phdrs - 1].filesz;
+	writer->shdr_offset = alignToPowerOf2(writer->phdr[writer->nr_phdrs - 1].offset +
+		writer->phdr[writer->nr_phdrs - 1].filesz, _Alignof(elf_shdr));
+	writer->shdr_data_off = writer->shdr_offset + sizeof(elf_shdr) * (writer->nr_output_secs + 2);
+	writer->shdr_data_len = calculate_shdr_data(writer);
+	/* Section header table will have all of our output sections, plus
+	 * shstrtab and the NULL section */
+	file_size = writer->shdr_data_off + writer->shdr_data_len;
 
 	if (ftruncate(fd, file_size) < 0) {
 		warn("ftruncate");
@@ -483,6 +576,7 @@ int elf_do_write(struct elf_writer *writer)
 	write_phdrs(writer, mapping);
 	write_segments(writer, mapping);
 	relocate(writer, mapping);
+	write_section_headers(writer, mapping);
 
 	munmap(mapping, file_size);
 	return 0;
