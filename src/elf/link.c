@@ -168,6 +168,25 @@ int add_to_symtable(struct symbol *sym)
         return 0;
 }
 
+struct symbol *maybe_resolve(struct symbol *s, struct input_section *inp, struct relocation *reloc)
+{
+	/* Properly weaken/complain about unresolved symbols */
+	if (s->symtype == SYM_TYPE_UNDEFINED) {
+		if (s->weak) {
+			/* A weak undefined reference is
+			 * allowed. In this case, we set value
+			 * to 0.
+			 */
+			s->value = 0;
+		} else {
+			warnx("%s:(%s+0x%x): Undefined symbol %s", inp->file->name, inp->name,
+					reloc->offset, s->name);
+			return NULL;
+		}
+	}
+	return s;
+}
+
 struct symbol *lookup_symtable(const char *name)
 {
         fnv_hash_t hash = fnv_hash(name, strlen(name));
@@ -189,8 +208,8 @@ void relocate_sym(struct symbol *s)
         struct input_section *inp;
         struct output_section *os;
 
-        /* Skip ABS, lazy symbols and weak undefined */
-        if (s->abs || s->symtype == SYM_TYPE_LAZY || (s->weak && s->symtype == SYM_TYPE_UNDEFINED))
+        /* Skip ABS, lazy symbols and undefined */
+        if (s->abs || s->symtype == SYM_TYPE_LAZY || s->symtype == SYM_TYPE_UNDEFINED)
                 return;
 
         inp = s->section;
@@ -230,35 +249,6 @@ void relocate_symbols(void)
         }
 }
 
-static
-int check_for_unresolved_syms(void)
-{
-        int i;
-        int st = 0;
-
-        for (i = 0; i < SYMBOL_TABLE_SIZE; i++) {
-                struct symbol *s = table.buckets[i];
-
-                while (s) {
-                        if (s->symtype == SYM_TYPE_UNDEFINED) {
-                                if (s->weak) {
-                                        /* A weak undefined reference is
-                                         * allowed. In this case, we set value
-                                         * to 0.
-                                         */
-                                        s->value = 0;
-                                } else {
-                                        warnx("Undefined symbol %s", s->name);
-                                        st = -1;
-                                }
-                        }
-
-                        s = s->next;
-                }
-        }
-
-        return st;
-}
 
 static
 int process_elf_symbols(struct input_file *file, elf_shdr *symtab,
@@ -574,9 +564,6 @@ int elf_do_link(struct hold_options *options)
                 if (elf_process_input(input) < 0)
                         return 1;
         }
-
-        if (check_for_unresolved_syms() < 0)
-                return 1;
 
         out_sec = elf_merge_sections(files, nfiles, &nr_output_sec);
         if (!out_sec)

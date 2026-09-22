@@ -3,13 +3,34 @@
 #include <elf.h>
 #include <err.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <hold.h>
 
 #include <elf/elf.h>
 #include <elf/output_section.h>
 
+#define REL64(val) *p = (val)
+#define REL32(val) *p32 = (val)
+
 static
-void do_reloc(struct relocation *reloc, struct input_section *inp, u8 *mapping)
+int relax_gotpcrelx(u8 *p, muptr S, muptr P)
+{
+	u32 *p32 = (u32 *) p;
+	u8 op = p[-2];
+	u8 modrm = p[-1];
+
+	if (op == 0x8b) {
+		/* mov sym@GOTPCREL(%rip), %reg -> lea sym(%rip), %reg */
+		p[-2] = 0x8d;
+		REL32(S - P);
+		return 0;
+	}
+
+	return -1;
+}
+
+static
+int do_reloc(struct relocation *reloc, struct input_section *inp, u8 *mapping)
 {
         /* Note: Uppercase, single letter variable names follow the notation used
          * in the AMD64 ABI.
@@ -26,8 +47,8 @@ void do_reloc(struct relocation *reloc, struct input_section *inp, u8 *mapping)
         u16 *p16 = (u16 *) p32;
         u8 *p8 = (u8 *) p16;
 
-#define REL64(val) *p = (val)
-#define REL32(val) *p32 = (val)
+	if (!maybe_resolve(reloc->sym, inp, reloc))
+		return -1;
 
         switch(reloc->rel_type)
         {
@@ -55,14 +76,25 @@ void do_reloc(struct relocation *reloc, struct input_section *inp, u8 *mapping)
                 case R_X86_64_PC8:
                         *p8 = S + A - P;
                         break;
-                default:
-                        errx(1, "Unhandled relocation type %x\n", reloc->rel_type);
+		case R_X86_64_REX_GOTPCRELX:
+			if (A == -4) {
+				if (relax_gotpcrelx(p8, S, P) == 0)
+					break;
+			}
+                        /* fallthrough */
+		default:
+                        warnx("%s:(%s+0x%x): Unhandled relocation type %x",
+					inp->file->name, inp->name, reloc->offset,
+					reloc->rel_type);
+			return -1;
         }
+
+	return 0;
 }
 
 void elf_do_relocs(struct input_file *file, struct relocation *relocs, u32 nrelocs, u8 *mapping)
 {
-        u32 i;
+        u32 i, errors = 0;
 
         for (i = 0; i < nrelocs; i++) {
                 struct input_section *section = &file->sections[relocs[i].section];
@@ -70,6 +102,14 @@ void elf_do_relocs(struct input_file *file, struct relocation *relocs, u32 nrelo
                  * At the moment, SHF_ALLOC.
                  */
                 if (section->out && section->out->offset)
-                        do_reloc(&relocs[i], section, mapping);
-        }
+		{
+			if (do_reloc(&relocs[i], section, mapping) < 0) {
+				if (errors++ >= 100)
+					exit(1);
+			}
+		}
+	}
+
+	if (errors)
+		exit(1);
 }

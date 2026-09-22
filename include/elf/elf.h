@@ -164,4 +164,5 @@ int add_to_symtable(struct symbol *sym);
 int elf_process_objfile(const char *filename, void *map, uptr fd_size,
                         const struct input_file_ops *ops, int flags);
 
+struct symbol *maybe_resolve(struct symbol *sym, struct input_section *inp, struct relocation *reloc);
 #endif

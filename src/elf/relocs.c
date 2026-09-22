@@ -47,9 +47,8 @@ int process_rela(struct input_file *file, elf_shdr *section, u8 *mapping)
                                 sym = lookup_symtable(sym->name);
                         }
 
-                        assert(sym != NULL);
-
-                        reloc->sym = sym;
+			assert(sym != NULL);
+			reloc->sym = sym;
                 }
 
                 verbose("Relocation %x (offset %lx, %s+%lx)\n", reloc->rel_type, reloc->offset,
