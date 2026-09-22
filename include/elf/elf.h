@@ -8,9 +8,9 @@
 #include <hold.h>
 
 enum symbol_type {
-        SYM_TYPE_DEFINED = 0,
-        SYM_TYPE_UNDEFINED,
-        SYM_TYPE_LAZY, /* for LLVM-style archive handling */
+	SYM_TYPE_DEFINED = 0,
+	SYM_TYPE_UNDEFINED,
+	SYM_TYPE_LAZY, /* for LLVM-style archive handling */
 };
 
 /* Define 64-bit as the max uptr */
@@ -19,46 +19,46 @@ typedef uint64_t muptr;
 struct input_section;
 
 struct symbol {
-        const char *name;
-        u32 name_hash;
-        enum symbol_type symtype;
-        muptr value;
-        muptr size;
+	const char *name;
+	u32 name_hash;
+	enum symbol_type symtype;
+	muptr value;
+	muptr size;
 
-        /* See ElfN_Sym's st_info and STT_* */
-        u8 st_type : 4;
-        /* .. and STV_* */
-        u8 st_vis : 3;
-        u8 weak : 1;
-        u8 local : 1;
-        u8 abs : 1;
-        /* names are only owned by the symbol table of the input_file.
-         * If we want to free a name, we must only free it if this is
-         * has not been an overridden symbol.
-         */
-        u8 nofree_name : 1;
+	/* See ElfN_Sym's st_info and STT_* */
+	u8 st_type : 4;
+	/* .. and STV_* */
+	u8 st_vis : 3;
+	u8 weak : 1;
+	u8 local : 1;
+	u8 abs : 1;
+	/* names are only owned by the symbol table of the input_file.
+	 * If we want to free a name, we must only free it if this is
+	 * has not been an overridden symbol.
+	 */
+	u8 nofree_name : 1;
 
-        /* For lazy symbols, this holds the position in the ar archive */
-        u32 ar_pos;
-        union {
-                struct input_section *section;
-                struct input_file *file;
-        };
+	/* For lazy symbols, this holds the position in the ar archive */
+	u32 ar_pos;
+	union {
+		struct input_section *section;
+		struct input_file *file;
+	};
 
-        struct symbol *next;
+	struct symbol *next;
 };
 
 #define SYMBOL_TABLE_SIZE 128
 struct symbol_table {
-        struct symbol *buckets[SYMBOL_TABLE_SIZE];
+	struct symbol *buckets[SYMBOL_TABLE_SIZE];
 };
 
 struct relocation {
-        struct symbol *sym;
-        muptr offset;
-        s64 addend;
-        u32 section;
-        u16 rel_type;
+	struct symbol *sym;
+	muptr offset;
+	s64 addend;
+	u32 section;
+	u16 rel_type;
 };
 
 /* Set when the section should be ignored by the final link.
@@ -71,56 +71,56 @@ struct input_file;
 struct output_section;
 
 struct input_section {
-        const char *name;
-        struct input_file *file;
-        struct output_section *out;
-        /* Next input section in the output section */
-        struct input_section *next_outputsec;
-        /* XXX sh_flags is not 32-bit for Elf64, but all flags seem to fit in
-         * 32-bits.
-         */
-        u32 sh_flags;
-        u32 sh_type;
-        muptr sh_addralign;
-        muptr sh_size;
-        muptr sh_offset;
-        muptr output_off;
+	const char *name;
+	struct input_file *file;
+	struct output_section *out;
+	/* Next input section in the output section */
+	struct input_section *next_outputsec;
+	/* XXX sh_flags is not 32-bit for Elf64, but all flags seem to fit in
+	 * 32-bits.
+	 */
+	u32 sh_flags;
+	u32 sh_type;
+	muptr sh_addralign;
+	muptr sh_size;
+	muptr sh_offset;
+	muptr output_off;
 };
 
 struct ar_archive_data;
 
 struct input_file_ops {
-        int (*open)(struct input_file *file);
-        void (*read)(struct input_file *file, void *buf, uptr size, uptr offset);
-        void (*close)(struct input_file *file);
+	int (*open)(struct input_file *file);
+	void (*read)(struct input_file *file, void *buf, uptr size, uptr offset);
+	void (*close)(struct input_file *file);
 };
 
 struct input_file {
-        const char *name;
-        u16 emachine;
-        u32 free_name : 1;
+	const char *name;
+	u16 emachine;
+	u32 free_name : 1;
 
-        struct input_section *sections;
-        u32 nsections;
-        struct symbol *syms;
-        u32 nsyms;
-        struct relocation *relocs;
-        u32 nrelocs;
+	struct input_section *sections;
+	u32 nsections;
+	struct symbol *syms;
+	u32 nsyms;
+	struct relocation *relocs;
+	u32 nrelocs;
 
-        struct ar_archive_data *ardata;
+	struct ar_archive_data *ardata;
 
-        struct {
-                u8 *long_file_names;
-        } archive;
+	struct {
+		u8 *long_file_names;
+	} archive;
 
-        union {
-                int fd;
-                struct {
-                        uptr archive_off;
-                };
-        } openf;
+	union {
+		int fd;
+		struct {
+			uptr archive_off;
+		};
+	} openf;
 
-        const struct input_file_ops *ops;
+	const struct input_file_ops *ops;
 };
 
 typedef Elf64_Ehdr elf_ehdr;
@@ -133,18 +133,18 @@ int process_rela(struct input_file *file, elf_shdr *section, u8 *mapping);
 struct symbol *lookup_symtable(const char *name);
 
 struct output_section **elf_merge_sections(struct input_file **files, u32 nfiles,
-                                          u32 *p_noutput);
+					  u32 *p_noutput);
 
 struct program_header;
 
 struct elf_writer {
-        struct output_section **out_section;
-        u32 nr_output_secs;
-        struct hold_options *options;
-        struct input_file **files;
-        u32 nfiles;
-        struct program_header *phdr;
-        u32 nr_phdrs;
+	struct output_section **out_section;
+	u32 nr_output_secs;
+	struct hold_options *options;
+	struct input_file **files;
+	u32 nfiles;
+	struct program_header *phdr;
+	u32 nr_phdrs;
 };
 
 /* Taking an elf writer, write an output, linked and relocated ELF file */
@@ -162,7 +162,7 @@ int add_to_symtable(struct symbol *sym);
 #define ELF_PROCESS_FILENAME_FREE (1 << 0)
 
 int elf_process_objfile(const char *filename, void *map, uptr fd_size,
-                        const struct input_file_ops *ops, int flags);
+			const struct input_file_ops *ops, int flags);
 
 struct symbol *maybe_resolve(struct symbol *sym, struct input_section *inp, struct relocation *reloc);
 #endif

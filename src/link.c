@@ -15,30 +15,30 @@ int elf_do_link(struct hold_options *opts);
 static
 int is_not_elfish(const char *filename)
 {
-        int fd = open(filename, O_RDONLY);
-        if (fd < 0) {
-                warn("%s", filename);
-                return 2;
-        }
+	int fd = open(filename, O_RDONLY);
+	if (fd < 0) {
+		warn("%s", filename);
+		return 2;
+	}
 
-        char magic[8];
-        if (read(fd, magic, sizeof(magic)) < sizeof(magic)) {
-                warn("%s: Failed to read magic", filename);
-                close(fd);
-                return 3;
-        }
+	char magic[8];
+	if (read(fd, magic, sizeof(magic)) < sizeof(magic)) {
+		warn("%s: Failed to read magic", filename);
+		close(fd);
+		return 3;
+	}
 
-        close(fd);
+	close(fd);
 
-        return !!memcmp(magic, "\x7f""ELF", 4) && !!memcmp(magic, "!<arch>\n", 8);
+	return !!memcmp(magic, "\x7f""ELF", 4) && !!memcmp(magic, "!<arch>\n", 8);
 }
 
 int hold_do_link(struct hold_options *opts)
 {
-        if (is_not_elfish(opts->input_files[0])) {
-                warnx("%s: unsupported backend", opts->input_files[0]);
-                return 1;
-        }
+	if (is_not_elfish(opts->input_files[0])) {
+		warnx("%s: unsupported backend", opts->input_files[0]);
+		return 1;
+	}
 
-        return elf_do_link(opts);
+	return elf_do_link(opts);
 }

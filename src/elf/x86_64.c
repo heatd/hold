@@ -32,76 +32,76 @@ int relax_gotpcrelx(u8 *p, muptr S, muptr P)
 static
 int do_reloc(struct relocation *reloc, struct input_section *inp, u8 *mapping)
 {
-        /* Note: Uppercase, single letter variable names follow the notation used
-         * in the AMD64 ABI.
-         */
+	/* Note: Uppercase, single letter variable names follow the notation used
+	 * in the AMD64 ABI.
+	 */
 
-        muptr S = reloc->sym->value;
-        s64 A = reloc->addend;
+	muptr S = reloc->sym->value;
+	s64 A = reloc->addend;
 
-        struct output_section *out = inp->out;
-        muptr offset = out->offset + inp->output_off + reloc->offset;
-        muptr P = out->address + inp->output_off + reloc->offset;
-        u64 *p = (u64 *) (mapping + offset);
-        u32 *p32 = (u32 *) (mapping + offset);
-        u16 *p16 = (u16 *) p32;
-        u8 *p8 = (u8 *) p16;
+	struct output_section *out = inp->out;
+	muptr offset = out->offset + inp->output_off + reloc->offset;
+	muptr P = out->address + inp->output_off + reloc->offset;
+	u64 *p = (u64 *) (mapping + offset);
+	u32 *p32 = (u32 *) (mapping + offset);
+	u16 *p16 = (u16 *) p32;
+	u8 *p8 = (u8 *) p16;
 
 	if (!maybe_resolve(reloc->sym, inp, reloc))
 		return -1;
 
-        switch(reloc->rel_type)
-        {
-                case R_X86_64_PC32:
-                /* Note: We can relax PLT32 into PC32 if the function is defined in this binary */
-                case R_X86_64_PLT32:
-                        REL32(S + A - P);
-                        break;
-                case R_X86_64_32:
-                case R_X86_64_32S:
-                        REL32(S + A);
-                        break;
-                case R_X86_64_64:
-                        REL64(S + A);
-                        break;
-                case R_X86_64_16:
-                        *p16 = S + A;
-                        break;
-                case R_X86_64_PC16:
-                        *p16 = S + A - P;
-                        break;
-                case R_X86_64_8:
-                        *p8 = S + A;
-                        break;
-                case R_X86_64_PC8:
-                        *p8 = S + A - P;
-                        break;
+	switch(reloc->rel_type)
+	{
+		case R_X86_64_PC32:
+		/* Note: We can relax PLT32 into PC32 if the function is defined in this binary */
+		case R_X86_64_PLT32:
+			REL32(S + A - P);
+			break;
+		case R_X86_64_32:
+		case R_X86_64_32S:
+			REL32(S + A);
+			break;
+		case R_X86_64_64:
+			REL64(S + A);
+			break;
+		case R_X86_64_16:
+			*p16 = S + A;
+			break;
+		case R_X86_64_PC16:
+			*p16 = S + A - P;
+			break;
+		case R_X86_64_8:
+			*p8 = S + A;
+			break;
+		case R_X86_64_PC8:
+			*p8 = S + A - P;
+			break;
 		case R_X86_64_REX_GOTPCRELX:
 			if (A == -4) {
 				if (relax_gotpcrelx(p8, S, P) == 0)
 					break;
 			}
-                        /* fallthrough */
+			/* fallthrough */
 		default:
-                        warnx("%s:(%s+0x%x): Unhandled relocation type %x",
+			warnx("%s:(%s+0x%x): Unhandled relocation type %x",
 					inp->file->name, inp->name, reloc->offset,
 					reloc->rel_type);
 			return -1;
-        }
+	}
 
 	return 0;
 }
 
 void elf_do_relocs(struct input_file *file, struct relocation *relocs, u32 nrelocs, u8 *mapping)
 {
-        u32 i, errors = 0;
+	u32 i, errors = 0;
 
-        for (i = 0; i < nrelocs; i++) {
-                struct input_section *section = &file->sections[relocs[i].section];
-                /* HACK: Let's only handle sections that have been mapped in the binary.
-                 * At the moment, SHF_ALLOC.
-                 */
-                if (section->out && section->out->offset)
+	for (i = 0; i < nrelocs; i++) {
+		struct input_section *section = &file->sections[relocs[i].section];
+		/* HACK: Let's only handle sections that have been mapped in the binary.
+		 * At the moment, SHF_ALLOC.
+		 */
+		if (section->out && section->out->offset)
 		{
 			if (do_reloc(&relocs[i], section, mapping) < 0) {
 				if (errors++ >= 100)

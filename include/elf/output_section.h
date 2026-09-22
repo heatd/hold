@@ -6,12 +6,12 @@
 #include <elf/elf.h>
 
 struct output_section {
-        const char *name;
-        struct input_section *isection_head, *isection_tail;
-        muptr max_alignment;
-        muptr address;
-        muptr offset;
-        muptr size;
+	const char *name;
+	struct input_section *isection_head, *isection_tail;
+	muptr max_alignment;
+	muptr address;
+	muptr offset;
+	muptr size;
 };
 
 #endif
