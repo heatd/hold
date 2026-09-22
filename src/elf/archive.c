@@ -63,17 +63,19 @@ int parse_ar(struct input_file *file, const void *mapping, unsigned long filesz)
 {
         const struct ar_hdr *hdr = mapping + strlen(AR_MAGIC);
         const u8 *end = mapping + filesz;
-        int seen_symtab = 0, seen_lfn = 0;
+        int seen_lfn = 0;
+	const struct ar_hdr *symtab = NULL;
 
         if (!!memcmp(hdr->ar_fmag, ARFMAG, 2)) {
                 warn("%s looked like an AR archive, but it isn't!", file->name);
                 return -1;
         }
 
+        file->ardata = (struct ar_archive_data *) mapping;
         while ((u8 *) hdr < end) {
                 u64 size;
 
-                if (seen_symtab && seen_lfn) {
+                if (symtab && seen_lfn) {
                         /* We're only here for the symtab (first entry) and
                          * the LFN entry (probably the second entry). Anything
                          * else is irrelevant to us atm.
@@ -87,9 +89,12 @@ int parse_ar(struct input_file *file, const void *mapping, unsigned long filesz)
                         switch(hdr->ar_name[1]) {
                                 case ' ': {
                                         /* symbol table */
-                                        if (parse_ar_symtab(file, hdr, size) < 0)
-                                                return 1;
-                                        seen_symtab++;
+					if (symtab) {
+						/* Two symtabs? */
+						warn("%s has more than one symtab", file->name);
+						return -1;
+					}
+					symtab = hdr;
                                         break;
                                 }
 
@@ -107,8 +112,12 @@ int parse_ar(struct input_file *file, const void *mapping, unsigned long filesz)
                 hdr = (struct ar_hdr *) ((u8 *) (hdr + 1) + size);
         }
 
-
-        file->ardata = (struct ar_archive_data *) mapping;
+	if (symtab) {
+		u64 size;
+                sscanf(hdr->ar_size, "%10lu", &size);
+		if (parse_ar_symtab(file, symtab, size) < 0)
+			return 1;
+	}
 
         return 0;
 }
