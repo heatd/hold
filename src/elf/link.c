@@ -179,7 +179,7 @@ struct symbol *maybe_resolve(struct symbol *s, struct input_section *inp, struct
 			 */
 			s->value = 0;
 		} else {
-			warnx("%s:(%s+0x%x): Undefined symbol %s", inp->file->name, inp->name,
+			warnx("%s:(%s+0x%lx): Undefined symbol %s", inp->file->name, inp->name,
 					reloc->offset, s->name);
 			return NULL;
 		}

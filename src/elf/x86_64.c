@@ -83,7 +83,7 @@ int do_reloc(struct relocation *reloc, struct input_section *inp, u8 *mapping)
 			}
 			/* fallthrough */
 		default:
-			warnx("%s:(%s+0x%x): Unhandled relocation type %x",
+			warnx("%s:(%s+0x%lx): Unhandled relocation type %x",
 					inp->file->name, inp->name, reloc->offset,
 					reloc->rel_type);
 			return -1;
