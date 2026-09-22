@@ -16,7 +16,7 @@ static
 int try_merge(struct output_section **out, u32 nr_output, struct input_section *inp)
 {
         u32 i;
-        char *dot;
+        const char *dot;
         struct output_section *s;
 
         /* TODO: In reality, this is probably not so simple... */
@@ -131,7 +131,7 @@ create_out:
         }
 
         /* Stop at the first . */
-        if ((dotp = strchr(sec->name + 1, '.')))
+        if ((dotp = (char *) strchr(sec->name + 1, '.')))
                 *dotp = '\0';
 
         verbose("Creating output section %s with input section %s(%s)\n", sec->name, inp->name, inp->file->name);
