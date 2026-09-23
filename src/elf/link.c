@@ -19,7 +19,7 @@
 
 #define HOLD_ELF_BITNESS (__CHAR_BIT__ * __SIZEOF_LONG__)
 
-static struct symbol_table table;
+struct symbol_table sym_table;
 static struct input_file **files;
 static unsigned int nfilescap;
 static unsigned int nfiles;
@@ -131,7 +131,7 @@ int add_to_symtable(struct symbol *sym)
 	 * make sure to memcpy ourselves over, so existing references refer to the same symbol.
 	 */
 	u32 index = sym->name_hash & (SYMBOL_TABLE_SIZE - 1);
-	struct symbol **sp = &table.buckets[index];
+	struct symbol **sp = &sym_table.buckets[index];
 
 	/* Make sure all symbols added are correctly filled, and that no local
 	 * symbol makes it to the global symbol tables.
@@ -183,7 +183,7 @@ struct symbol *lookup_symtable(const char *name)
 {
 	fnv_hash_t hash = fnv_hash(name, strlen(name));
 	u32 index = hash & (SYMBOL_TABLE_SIZE - 1);
-	struct symbol *s = table.buckets[index];
+	struct symbol *s = sym_table.buckets[index];
 
 	while (s) {
 		if (s->name_hash == hash && !strcmp(s->name, name))
@@ -225,7 +225,7 @@ void relocate_symbols(void)
 	 */
 	for (i = 0; i < SYMBOL_TABLE_SIZE; i++) {
 		struct symbol *s;
-		for (s = table.buckets[i]; s != NULL; s = s->next)
+		for (s = sym_table.buckets[i]; s != NULL; s = s->next)
 			relocate_sym(s);
 	}
 

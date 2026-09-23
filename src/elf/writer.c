@@ -442,6 +442,25 @@ void relocate(struct elf_writer *writer, u8 *mapping)
 	}
 }
 
+static inline void strtab_start(struct strtab_info *info, u8 *mapping)
+{
+	/* First string is always the NULL string */
+	info->pos++;
+	mapping[info->out->offset] = 0;
+}
+
+static inline Elf64_Word elf_put_string(struct strtab_info *info, u8 *mapping,
+	const char *str)
+{
+	u32 len = strlen(str) + 1;
+	Elf64_Word out;
+
+	memcpy(mapping + info->out->offset + info->pos, str, len);
+	out = info->pos;
+	info->pos += len;
+	return out;
+}
+
 static
 void write_section_hdr(elf_shdr *shdr, struct elf_writer *writer, struct output_section *out)
 {
@@ -450,10 +469,10 @@ void write_section_hdr(elf_shdr *shdr, struct elf_writer *writer, struct output_
 	shdr->sh_name = writer->shstrtab_pos;
 	shdr->sh_addr = out->address;
 	shdr->sh_addralign = out->max_alignment;
-	shdr->sh_entsize = 0;
+	shdr->sh_entsize = out->sh_entsize;
 	shdr->sh_flags = out->sh_flags;
-	shdr->sh_info = 0;
-	shdr->sh_link = 0;
+	shdr->sh_info = out->sh_info;
+	shdr->sh_link = out->sh_link;
 	shdr->sh_offset = out->offset;
 	shdr->sh_size = out->size;
 	shdr->sh_type = out->sh_type;
@@ -463,11 +482,62 @@ void write_section_hdr(elf_shdr *shdr, struct elf_writer *writer, struct output_
 	writer->shstrtab_pos += name_len;
 }
 
+static inline struct output_section *elf_find_section(struct elf_writer *writer, const char *name)
+{
+	u32 i;
+
+	for (i = 0; i < writer->nr_output_secs; i++) {
+		if (!strcmp(writer->out_section[i]->name, name))
+			return writer->out_section[i];
+	}
+	return NULL;
+}
+
+static
+u32 symbol_bind(struct symbol *sym)
+{
+	if (sym->local)
+		return STB_LOCAL;
+	if (sym->weak)
+		return STB_WEAK;
+	return STB_GLOBAL;
+}
+
+static
+void write_symbols(struct elf_writer *writer, u8 *mapping)
+{
+	u32 i = 0;
+	struct symbol *sym;
+	struct output_section *out;
+	elf_sym *dst;
+
+	/* TODO: LOCAL symbols */
+	out = elf_find_section(writer, ".symtab");
+	assert(out);
+
+	dst = (elf_sym *) (mapping + out->offset);
+	*dst++ = (elf_sym) {0};
+
+	for_every_symbol(i, sym) {
+		if (sym->symtype == SYM_TYPE_DEFINED) {
+			dst->st_info = ELF64_ST_INFO(symbol_bind(sym), sym->st_type);
+			dst->st_other = sym->st_vis;
+			dst->st_shndx = sym->section->out->index + 1;
+			dst->st_size = sym->size;
+			dst->st_value = sym->value;
+			dst->st_name = elf_put_string(&writer->strtab, mapping, sym->name);
+			dst++;
+		}
+	}
+}
+
 static
 void write_section_headers(struct elf_writer *writer, u8 *mapping)
 {
 	elf_shdr *shdr = (elf_shdr *) (mapping + writer->shdr_offset);
 	u32 section;
+
+	strtab_start(&writer->strtab, mapping);
 
 	/* NULL string - useful for a variety of situations */
 	writer->shstrtab[0] = '\0';
@@ -482,6 +552,7 @@ void write_section_headers(struct elf_writer *writer, u8 *mapping)
 
 	memcpy(mapping + writer->out_section[writer->nr_output_secs - 1]->offset,
 		writer->shstrtab, writer->shstrtab_len);
+	write_symbols(writer, mapping);
 }
 
 static
@@ -505,9 +576,53 @@ void elf_add_shstrtab(struct elf_writer *writer)
 }
 
 static
+void elf_add_symtab(struct elf_writer *writer)
+{
+	u32 i, nr_syms = 0, symtab_strs_len = 0;
+	struct output_section *out;
+	struct symbol *sym;
+
+	for_every_symbol(i, sym) {
+		if (sym->symtype == SYM_TYPE_DEFINED) {
+			nr_syms++;
+			symtab_strs_len += strlen(sym->name) + 1;
+		}
+	}
+
+	out = elf_add_synthetic_section(writer, ".symtab", (nr_syms + 1) * sizeof(elf_sym),
+			_Alignof(elf_sym), 0, SHT_SYMTAB);
+	if (!out)
+		errx(1, "elf_add_symtab failed");
+	out->sh_entsize = sizeof(elf_sym);
+	/* See TODO above. sh_info holds the one-past the last LOCAL symbol.
+	 * We have no LOCAL symbols except entry 0.
+	 */
+	out->sh_info = 1;
+	writer->nr_symtab = nr_syms + 1;
+	strtab_init(&writer->strtab, symtab_strs_len + 1);
+}
+
+static
+void elf_add_strtab(struct elf_writer *writer)
+{
+	struct output_section *out;
+
+	out = elf_add_synthetic_section(writer, ".strtab", writer->strtab.len,
+			0, SHF_STRINGS, SHT_STRTAB);
+	if (!out)
+		errx(1, "elf_add_strtab failed");
+	writer->strtab.out = out;
+}
+
+static
 void elf_add_synthetic_sections(struct elf_writer *writer)
 {
+	elf_add_symtab(writer);
+	elf_add_strtab(writer);
 	elf_add_shstrtab(writer);
+
+	/* Patch the symtab's sh_link to point at the recently created .strtab */
+	elf_find_section(writer, ".symtab")->sh_link = writer->strtab.out->index + 1;
 }
 
 static

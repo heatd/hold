@@ -101,6 +101,7 @@ struct output_section *elf_add_synthetic_section(struct elf_writer *writer, cons
 	outp->isection_head = outp->isection_tail = NULL;
 	outp->sh_flags = sh_flags;
 	outp->sh_type = sh_type;
+	outp->index = writer->nr_output_secs;
 	out[writer->nr_output_secs++] = outp;
 	writer->out_section = out;
 	return outp;
@@ -177,6 +178,7 @@ create_out:
 	sec->isection_head = sec->isection_tail = inp;
 	sec->sh_flags = inp->sh_flags;
 	sec->sh_type = inp->sh_type;
+	sec->index = nr_output - 1;
 	inp->out = sec;
 	goto loop;
 }

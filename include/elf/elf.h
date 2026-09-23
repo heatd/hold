@@ -53,6 +53,12 @@ struct symbol_table {
 	struct symbol *buckets[SYMBOL_TABLE_SIZE];
 };
 
+extern struct symbol_table sym_table;
+
+#define for_every_symbol(i, sym) \
+for (i = 0; i < SYMBOL_TABLE_SIZE; i++) \
+	for (sym = sym_table.buckets[i]; sym; sym = sym->next)
+
 struct relocation {
 	struct symbol *sym;
 	muptr offset;
@@ -137,6 +143,18 @@ struct output_section **elf_merge_sections(struct input_file **files, u32 nfiles
 
 struct program_header;
 
+struct strtab_info {
+	u32 len;
+	u32 pos;
+	struct output_section *out;
+};
+
+static inline void strtab_init(struct strtab_info *info, u32 len)
+{
+	info->len = len;
+	info->pos = 0;
+}
+
 struct elf_writer {
 	struct output_section **out_section;
 	u32 nr_output_secs;
@@ -151,6 +169,8 @@ struct elf_writer {
 	char *shstrtab;
 	u32 shstrtab_len;
 	u32 shstrtab_pos;
+	struct strtab_info strtab;
+	u32 nr_symtab;
 };
 
 /* Taking an elf writer, write an output, linked and relocated ELF file */

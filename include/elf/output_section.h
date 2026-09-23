@@ -10,6 +10,10 @@ struct output_section {
 	struct input_section *isection_head, *isection_tail;
 	u32 sh_flags;
 	u32 sh_type;
+	u32 sh_link;
+	u32 sh_entsize;
+	u32 sh_info;
+	u32 index;
 	muptr max_alignment;
 	muptr address;
 	muptr offset;
