@@ -17,15 +17,7 @@
 #include <elf/elf.h>
 #include <elf/output_section.h>
 
-#if defined(__linux__) || defined(__onyx__)
-#define HOLD_ELF_PLATFORM 1
-#else
-#error "Platform not ELF!"
-#endif
-
-#ifdef HOLD_ELF_PLATFORM
-#define HOLD_ELF_BITNESS (__CHAR_BIT__ * __SIZEOF_LONG__) 
-#endif
+#define HOLD_ELF_BITNESS (__CHAR_BIT__ * __SIZEOF_LONG__)
 
 static struct symbol_table table;
 static struct input_file **files;

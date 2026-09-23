@@ -1,8 +1,8 @@
-subdir('elf')
-
-sources = [
+sources = files(
   'hold.c',
   'link.c',
-  ] + elf_sources
+)
+
+subdir('elf')
 
 executable('ld.hold', sources, include_directories: inc, install: true)
