@@ -8,6 +8,8 @@
 struct output_section {
 	const char *name;
 	struct input_section *isection_head, *isection_tail;
+	u32 sh_flags;
+	u32 sh_type;
 	muptr max_alignment;
 	muptr address;
 	muptr offset;

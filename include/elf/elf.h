@@ -171,4 +171,6 @@ int elf_process_objfile(const char *filename, void *map, uptr fd_size,
 			const struct input_file_ops *ops, int flags);
 
 struct symbol *maybe_resolve(struct symbol *sym, struct input_section *inp, struct relocation *reloc);
+struct output_section *elf_add_synthetic_section(struct elf_writer *writer, const char *name, u32 size,
+	u32 align, u32 sh_flags, u32 sh_type);
 #endif

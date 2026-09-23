@@ -71,6 +71,41 @@ int should_ignore_section(struct input_section *inp)
 	}
 }
 
+struct output_section *elf_add_synthetic_section(struct elf_writer *writer, const char *name, u32 size,
+	u32 align, u32 sh_flags, u32 sh_type)
+{
+	struct output_section **out, *outp;
+
+	outp = calloc(1, sizeof(*outp));
+	if (!outp) {
+		warn("elf_add_synthetic_section: calloc");
+		return NULL;
+	}
+
+	out = reallocarray(writer->out_section, writer->nr_output_secs + 1, sizeof(struct output_section *));
+	if (!out) {
+		warn("elf_add_synthetic_section: reallocarray");
+		free(outp);
+		return NULL;
+	}
+
+	outp->name = strdup(name);
+	if (!outp->name) {
+		free(outp);
+		warn("elf_add_synthetic_section: strdup");
+		return NULL;
+	}
+
+	outp->max_alignment = align ?: 1;
+	outp->size = size;
+	outp->isection_head = outp->isection_tail = NULL;
+	outp->sh_flags = sh_flags;
+	outp->sh_type = sh_type;
+	out[writer->nr_output_secs++] = outp;
+	writer->out_section = out;
+	return outp;
+}
+
 struct output_section **elf_merge_sections(struct input_file **files, u32 nfiles,
 					  u32 *p_noutput)
 {
@@ -140,6 +175,8 @@ create_out:
 	sec->max_alignment = inp->sh_addralign ?: 1;
 	sec->size = inp->sh_size;
 	sec->isection_head = sec->isection_tail = inp;
+	sec->sh_flags = inp->sh_flags;
+	sec->sh_type = inp->sh_type;
 	inp->out = sec;
 	goto loop;
 }

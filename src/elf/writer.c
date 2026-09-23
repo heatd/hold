@@ -47,9 +47,9 @@ int write_elf_header(struct elf_writer *writer, int fd, uptr entry_point)
 	ehdr.e_phentsize = sizeof(elf_phdr);
 	ehdr.e_phnum = writer->nr_phdrs;
 	ehdr.e_shentsize = sizeof(elf_shdr);
-	ehdr.e_shnum = writer->nr_output_secs + 2;
+	ehdr.e_shnum = writer->nr_output_secs + 1;
 	ehdr.e_shoff = writer->shdr_offset;
-	ehdr.e_shstrndx = writer->nr_output_secs + 1;
+	ehdr.e_shstrndx = writer->nr_output_secs;
 
 	return write(fd, &ehdr, sizeof(ehdr));
 }
@@ -451,43 +451,16 @@ void write_section_hdr(elf_shdr *shdr, struct elf_writer *writer, struct output_
 	shdr->sh_addr = out->address;
 	shdr->sh_addralign = out->max_alignment;
 	shdr->sh_entsize = 0;
-	shdr->sh_flags = out->isection_head->sh_flags;
+	shdr->sh_flags = out->sh_flags;
 	shdr->sh_info = 0;
 	shdr->sh_link = 0;
 	shdr->sh_offset = out->offset;
 	shdr->sh_size = out->size;
-
-	/* XXX dirty hack */
-	if (!out->offset)
-		shdr->sh_size = 0;
-	shdr->sh_type = out->isection_head->sh_type;
+	shdr->sh_type = out->sh_type;
 
 	name_len = strlen(out->name) + 1;
 	memcpy(writer->shstrtab + writer->shstrtab_pos, out->name, name_len);
 	writer->shstrtab_pos += name_len;
-}
-
-static
-void write_shstrtab(elf_shdr *shdr, struct elf_writer *writer, u8 *mapping)
-{
-	u32 name_len;
-
-	shdr->sh_name = writer->shstrtab_pos;
-	shdr->sh_addr = 0;
-	shdr->sh_addralign = 1;
-	shdr->sh_entsize = 0;
-	shdr->sh_flags = SHF_STRINGS;
-	shdr->sh_info = 0;
-	shdr->sh_link = 0;
-	shdr->sh_offset = writer->shdr_data_off;
-	shdr->sh_size = writer->shstrtab_len;
-	shdr->sh_type = SHT_STRTAB;
-
-	name_len = strlen(".shstrtab") + 1;
-	memcpy(writer->shstrtab + writer->shstrtab_pos, ".shstrtab", name_len);
-	writer->shstrtab_pos += name_len;
-
-	memcpy(mapping + shdr->sh_offset, writer->shstrtab, writer->shstrtab_len);
 }
 
 static
@@ -507,12 +480,14 @@ void write_section_headers(struct elf_writer *writer, u8 *mapping)
 		write_section_hdr(shdr++, writer, writer->out_section[section]);
 	}
 
-	write_shstrtab(shdr, writer, mapping);
+	memcpy(mapping + writer->out_section[writer->nr_output_secs - 1]->offset,
+		writer->shstrtab, writer->shstrtab_len);
 }
 
 static
-u32 calculate_shdr_data(struct elf_writer *writer)
+void elf_add_shstrtab(struct elf_writer *writer)
 {
+	struct output_section *out;
 	u32 i, total = strlen(".shstrtab") + 2;
 
 	/* Right now, it's just the shtrtab data we need */
@@ -523,7 +498,41 @@ u32 calculate_shdr_data(struct elf_writer *writer)
 		err(1, "out of memory allocating shstrtab");
 	writer->shstrtab_len = total;
 	writer->shstrtab_pos = 0;
-	return total;
+	out = elf_add_synthetic_section(writer, ".shstrtab", total, 1,
+		SHF_STRINGS, SHT_STRTAB);
+	if (!out)
+		errx(1, "elf_add_shstrtab failed");
+}
+
+static
+void elf_add_synthetic_sections(struct elf_writer *writer)
+{
+	elf_add_shstrtab(writer);
+}
+
+static
+void elf_assign_shdr_data(struct elf_writer *writer)
+{
+	u32 curr_off = writer->shdr_data_off;
+	struct output_section *out;
+	u32 i;
+
+	/* For every output section that does not have an offset assigned (_has_
+	 * to be !SHF_ALLOC), assign an offset and properly align things. This algo
+	 * is, again, non-optimal. It could be made optimal with sorting. It is
+	 * what it is.
+	 */
+	for (i = 0; i < writer->nr_output_secs; i++) {
+		out = writer->out_section[i];
+		if (!out->offset) {
+			curr_off = alignToPowerOf2(curr_off, out->max_alignment);
+			out->offset = curr_off;
+			assign_input_sections_off(out);
+			curr_off += out->size;
+		}
+	}
+
+	writer->shdr_data_len = curr_off - writer->shdr_data_off;
 }
 
 /* Taking an elf writer, write an output, linked and relocated ELF file */
@@ -543,11 +552,12 @@ int elf_do_write(struct elf_writer *writer)
 		return -1;
 
 	relocate_symbols();
+	elf_add_synthetic_sections(writer);
 
 	writer->shdr_offset = alignToPowerOf2(writer->phdr[writer->nr_phdrs - 1].offset +
 		writer->phdr[writer->nr_phdrs - 1].filesz, _Alignof(elf_shdr));
-	writer->shdr_data_off = writer->shdr_offset + sizeof(elf_shdr) * (writer->nr_output_secs + 2);
-	writer->shdr_data_len = calculate_shdr_data(writer);
+	writer->shdr_data_off = writer->shdr_offset + sizeof(elf_shdr) * (writer->nr_output_secs + 1);
+	elf_assign_shdr_data(writer);
 	/* Section header table will have all of our output sections, plus
 	 * shstrtab and the NULL section */
 	file_size = writer->shdr_data_off + writer->shdr_data_len;
