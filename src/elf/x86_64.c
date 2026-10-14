@@ -22,7 +22,24 @@ int relax_gotpcrelx(u8 *p, muptr S, muptr P)
 	if (op == 0x8b) {
 		/* mov sym@GOTPCREL(%rip), %reg -> lea sym(%rip), %reg */
 		p[-2] = 0x8d;
-		REL32(S - P);
+		REL32(S - 4 - P);
+		return 0;
+	} else if (op == 0xff && modrm == 0x15) {
+		/* call instruction.
+		 * call *sym@GOTPCREL(%rip) -> addr32 call sym
+		 */
+		p[-2] = 0x67;
+		p[-1] = 0xe8;
+		REL32(S - 4 - P);
+		return 0;
+	} else if (op == 0xff && modrm == 0x25) {
+		/* jmp instruction.
+		 * jmp *sym@GOTPCREL(%rip) -> jmp sym; nop
+		 */
+		p[-2] = 0xe9;
+		p[3] = 0x90;
+		p32 = (u32 *) (p - 1);
+		REL32(S - 4 - P + 1);
 		return 0;
 	}
 
@@ -76,6 +93,7 @@ int do_reloc(struct relocation *reloc, struct input_section *inp, u8 *mapping)
 		case R_X86_64_PC8:
 			*p8 = S + A - P;
 			break;
+		case R_X86_64_GOTPCRELX:
 		case R_X86_64_REX_GOTPCRELX:
 			if (A == -4) {
 				if (relax_gotpcrelx(p8, S, P) == 0)
